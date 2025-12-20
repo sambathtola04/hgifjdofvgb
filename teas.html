@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mini GTA 2D Full Demo</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background: #87CEEB;
+            font-family: sans-serif;
+        }
+
+        canvas {
+            display: block;
+            background: #7ec850;
+        }
+
+        #hud {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: white;
+            font-size: 16px;
+            background: rgba(0, 0, 0, 0.5);
+            padding: 8px;
+            border-radius: 6px;
+        }
+
+        #missions {
+            position: absolute;
+            top: 50px;
+            left: 10px;
+            color: white;
+            font-size: 14px;
+            background: rgba(0, 0, 0, 0.5);
+            padding: 6px;
+            border-radius: 6px;
+        }
+    </style>
+</head>
+
+<body>
+    <canvas id="game"></canvas>
+    <div id="hud">Money: $0 | Score: 0 | Health: 100 | Wanted: 0 | Vehicle: Car</div>
+    <div id="missions">Mission: None</div>
+    <script>
+        const canvas = document.getElementById('game');
+        const ctx = canvas.getContext('2d');
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+
+        // World
+        const world = { width: 2000, height: 2000, buildings: [], npcs: [], police: [], items: [], pedestrians: [], traffic: [] };
+
+        // Generate buildings
+        for (let i = 0; i < 60; i++) {
+            world.buildings.push({ x: Math.random() * (world.width - 100), y: Math.random() * (world.height - 100), w: 50 + Math.random() * 150, h: 50 + Math.random() * 150, color: '#444' });
+        }
+
+        // Generate collectibles
+        for (let i = 0; i < 30; i++) {
+            world.items.push({ x: Math.random() * (world.width - 20), y: Math.random() * (world.height - 20), size: 10, color: '#ffd700', collected: false });
+        }
+
+        // Player vehicles
+        const vehicles = [
+            { type: 'Car', w: 40, h: 20, maxSpeed: 6, accel: 0.3, color: '#ff0000' },
+            { type: 'Motorbike', w: 30, h: 15, maxSpeed: 9, accel: 0.5, color: '#00ff00' },
+            { type: 'Truck', w: 60, h: 30, maxSpeed: 4, accel: 0.2, color: '#0000ff' }
+        ];
+        let currentVehicleIndex = 0;
+
+        // Player
+        const player = { x: 100, y: 100, speed: 0, angle: 0, health: 100, money: 0, score: 0, wanted: 0, w: vehicles[0].w, h: vehicles[0].h, maxSpeed: vehicles[0].maxSpeed, accel: vehicles[0].accel, color: vehicles[0].color };
+
+        // NPC cars
+        for (let i = 0; i < 5; i++) {
+            world.npcs.push({ x: Math.random() * world.width, y: Math.random() * world.height, w: 40, h: 20, speed: 2 + Math.random() * 2, angle: Math.random() * Math.PI * 2, color: '#00f' });
+        }
+
+        // Police
+        for (let i = 0; i < 3; i++) {
+            world.police.push({ x: Math.random() * world.width, y: Math.random() * world.height, w: 40, h: 20, speed: 3, angle: Math.random() * Math.PI * 2, color: '#ff0' });
+        }
+
+        // Pedestrians
+        for (let i = 0; i < 10; i++) {
+            world.pedestrians.push({ x: Math.random() * world.width, y: Math.random() * world.height, size: 15, angle: Math.random() * Math.PI * 2, speed: 1.2, color: '#fff' });
+        }
+
+        // Traffic
+        for (let i = 0; i < 10; i++) {
+            world.traffic.push({ x: Math.random() * world.width, y: Math.random() * world.height, w: 40, h: 20, speed: 2, angle: Math.random() * Math.PI * 2, color: '#888' });
+        }
+
+        // Camera
+        const camera = { x: 0, y: 0, width: canvas.width, height: canvas.height };
+
+        // Bullets
+        const bullets = [];
+
+        // Missions
+        let currentMission = null;
+
+        // Input
+        const keys = {};
+        window.addEventListener('keydown', e => keys[e.key.toLowerCase()] = true);
+        window.addEventListener('keyup', e => keys[e.key.toLowerCase()] = false);
+
+        // Switch vehicle
+        window.addEventListener('keydown', e => {
+            if (e.key === 'Enter') {
+                currentVehicleIndex = (currentVehicleIndex + 1) % vehicles.length;
+                const v = vehicles[currentVehicleIndex];
+                player.w = v.w; player.h = v.h; player.maxSpeed = v.maxSpeed; player.accel = v.accel; player.color = v.color;
+                document.getElementById('hud').textContent = `Money: $${player.money} | Score: ${player.score} | Health: ${player.health} | Wanted: ${player.wanted} | Vehicle: ${v.type}`;
+            }
+        });
+
+        // Shoot bullet
+        window.addEventListener('keydown', e => {
+            if (e.key === ' ') {
+                bullets.push({ x: player.x + player.w / 2, y: player.y + player.h / 2, angle: player.angle, speed: 10 });
+            }
+        });
+
+        // Game loop
+        function update() {
+            // Player movement
+            if (keys['arrowup'] || keys['w']) player.speed += player.accel;
+            else if (keys['arrowdown'] || keys['s']) player.speed -= player.accel;
+            else player.speed *= 1 - 0.05;
+
+            if (player.speed > player.maxSpeed) player.speed = player.maxSpeed;
+            if (player.speed < -player.maxSpeed / 2) player.speed = -player.maxSpeed / 2;
+
+            if (keys['arrowleft'] || keys['a']) player.angle -= 0.04;
+            if (keys['arrowright'] || keys['d']) player.angle += 0.04;
+
+            player.x += Math.cos(player.angle) * player.speed;
+            player.y += Math.sin(player.angle) * player.speed;
+
+            // Boundaries
+            player.x = Math.max(0, Math.min(player.x, world.width - player.w));
+            player.y = Math.max(0, Math.min(player.y, world.height - player.h));
+
+            // Camera follow
+            camera.x = Math.max(0, Math.min(player.x - camera.width / 2 + player.w / 2, world.width - camera.width));
+            camera.y = Math.max(0, Math.min(player.y - camera.height / 2 + player.h / 2, world.height - camera.height));
+
+            // NPCs
+            world.npcs.forEach(n => {
+                n.x += Math.cos(n.angle) * n.speed;
+                n.y += Math.sin(n.angle) * n.speed;
+                if (n.x < 0 || n.x > world.width - n.w) n.angle = Math.PI - n.angle;
+                if (n.y < 0 || n.y > world.height - n.h) n.angle = -n.angle;
+                // Collision increases wanted
+                const dx = player.x - n.x; const dy = player.y - n.y;
+                if (Math.sqrt(dx * dx + dy * dy) < 30) player.wanted += 1;
+            });
+
+            // Police chase
+            world.police.forEach(p => {
+                if (player.wanted > 0) {
+                    const dx = player.x - p.x;
+                    const dy = player.y - p.y;
+                    const angle = Math.atan2(dy, dx);
+                    p.angle = angle;
+                    p.x += Math.cos(p.angle) * p.speed;
+                    p.y += Math.sin(p.angle) * p.speed;
+                    if (Math.sqrt(dx * dx + dy * dy) < 30) player.health -= 1;
+                }
+            });
+
+            // Pedestrians
+            world.pedestrians.forEach(p => {
+                p.x += Math.cos(p.angle) * p.speed;
+                p.y += Math.sin(p.angle) * p.speed;
+                if (Math.random() < 0.01) p.angle = Math.random() * Math.PI * 2;
+                if (p.x < 0 || p.x > world.width - p.size) p.angle = Math.PI - p.angle;
+                if (p.y < 0 || p.y > world.height - p.size) p.angle = -p.angle;
+            });
+
+            // Traffic
+            world.traffic.forEach(t => {
+                t.x += Math.cos(t.angle) * t.speed;
+                t.y += Math.sin(t.angle) * t.speed;
+                if (t.x < 0 || t.x > world.width - t.w) t.angle = Math.PI - t.angle;
+                if (t.y < 0 || t.y > world.height - t.h) t.angle = -t.angle;
+            });
+
+            // Bullets
+            for (let i = bullets.length - 1; i >= 0; i--) {
+                const b = bullets[i];
+                b.x += Math.cos(b.angle) * b.speed;
+                b.y += Math.sin(b.angle) * b.speed;
+                if (b.x < 0 || b.x > world.width || b.y < 0 || b.y > world.height) { bullets.splice(i, 1); continue; }
+                // Hit NPC
+                world.npcs.forEach((n, j) => {
+                    const dx = b.x - (n.x + n.w / 2); const dy = b.y - (n.y + n.h / 2);
+                    if (Math.sqrt(dx * dx + dy * dy) < 20) { bullets.splice(i, 1); world.npcs.splice(j, 1); player.score += 10; }
+                });
+            }
+
+            // Collect items
+            world.items.forEach(item => {
+                if (!item.collected) {
+                    const dx = player.x + player.w / 2 - (item.x + item.size / 2);
+                    const dy = player.y + player.h / 2 - (item.y + item.size / 2);
+                    if (Math.sqrt(dx * dx + dy * dy) < 30) { item.collected = true; player.money += 10; player.score += 5; }
+                }
+            });
+
+            // Missions
+            if (!currentMission) {
+                currentMission = { desc: 'Collect 3 items', progress: 0, target: 3 };
+            }
+            let collectedCount = world.items.filter(i => i.collected).length;
+            currentMission.progress = Math.min(collectedCount, currentMission.target);
+            if (currentMission.progress >= currentMission.target) {
+                player.money += 50; player.score += 20;
+                currentMission = null;
+            }
+
+            // HUD update
+            const v = vehicles[currentVehicleIndex];
+            document.getElementById('hud').textContent = `Money: $${player.money} | Score: ${player.score} | Health: ${player.health} | Wanted: ${player.wanted} | Vehicle: ${v.type}`;
+            document.getElementById('missions').textContent = currentMission ? `Mission: ${currentMission.desc} (${currentMission.progress}/${currentMission.target})` : 'Mission: None';
+        }
+
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Buildings
+            world.buildings.forEach(b => {
+                ctx.fillStyle = b.color;
+                ctx.fillRect(b.x - camera.x, b.y - camera.y, b.w, b.h);
+            });
+
+            // Items
+            world.items.forEach(item => {
+                if (!item.collected) {
+                    ctx.fillStyle = item.color;
+                    ctx.fillRect(item.x - camera.x, item.y - camera.y, item.size, item.size);
+                }
+            });
+
+            // Pedestrians
+            world.pedestrians.forEach(p => {
+                ctx.fillStyle = p.color;
+                ctx.fillRect(p.x - camera.x, p.y - camera.y, p.size, p.size);
+            });
+
+            // NPC cars
+            world.npcs.forEach(n => {
+                ctx.save(); ctx.translate(n.x - camera.x + n.w / 2, n.y - camera.y + n.h / 2); ctx.rotate(n.angle);
+                ctx.fillStyle = n.color; ctx.fillRect(-n.w / 2, -n.h / 2, n.w, n.h); ctx.restore();
+            });
+
+            // Police cars
+            world.police.forEach(p => {
+                ctx.save(); ctx.translate(p.x - camera.x + p.w / 2, p.y - camera.y + p.h / 2); ctx.rotate(p.angle);
+                ctx.fillStyle = p.color; ctx.fillRect(-p.w / 2, -p.h / 2, p.w, p.h); ctx.restore();
+            });
+
+            // Traffic
+            world.traffic.forEach(t => {
+                ctx.save(); ctx.translate(t.x - camera.x + t.w / 2, t.y - camera.y + t.h / 2); ctx.rotate(t.angle);
+                ctx.fillStyle = t.color; ctx.fillRect(-t.w / 2, -t.h / 2, t.w, t.h); ctx.restore();
+            });
+
+            // Bullets
+            bullets.forEach(b => {
+                ctx.fillStyle = 'orange';
+                ctx.fillRect(b.x - camera.x - 2, b.y - camera.y - 2, 4, 4);
+            });
+
+            // Player
+            ctx.save();
+            ctx.translate(player.x - camera.x + player.w / 2, player.y - camera.y + player.h / 2);
+            ctx.rotate(player.angle);
+            ctx.fillStyle = player.color;
+            ctx.fillRect(-player.w / 2, -player.h / 2, player.w, player.h);
+            ctx.restore();
+        }
+
+        function loop() { update(); draw(); requestAnimationFrame(loop); }
+        loop();
+    </script>
+</body>
+
+</html>
